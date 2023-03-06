@@ -43,7 +43,7 @@ DAMAGE.
 #endif
 using namespace std::chrono_literals;
 
-extern "C" 
+extern "C"
 {
     #include "marvelmind_hedge.h"
 }
@@ -64,6 +64,7 @@ extern "C"
 
 #include "marvelmind_ros2_msgs/msg/beacon_distance.hpp"
 #include "marvelmind_ros2_msgs/msg/beacon_position_addressed.hpp"
+#include "marvelmind_ros2_msgs/msg/beacon_positions.hpp"
 
 #include "marvelmind_ros2_msgs/msg/marvelmind_waypoint.hpp"
 
@@ -99,6 +100,7 @@ class marvelmind_ros2 : public rclcpp::Node
         rclcpp::Publisher<marvelmind_ros2_msgs::msg::HedgeQuality>::SharedPtr hedge_quality_publisher;
         rclcpp::Publisher<marvelmind_ros2_msgs::msg::MarvelmindWaypoint>::SharedPtr marvelmind_waypoint_publisher;
         rclcpp::Publisher<marvelmind_ros2_msgs::msg::MarvelmindUserData>::SharedPtr marvelmind_user_data_publisher;
+        rclcpp::Publisher<marvelmind_ros2_msgs::msg::BeaconPositions>::SharedPtr beacon_positions_publisher;
 
         // Timer to execute publications so we can easily control rate
         rclcpp::TimerBase::SharedPtr marvelmind_ros2_pub_timer;
@@ -115,6 +117,7 @@ class marvelmind_ros2 : public rclcpp::Node
         bool marvelmindWaypointUpdateCheck(void);
         bool marvelmindUserDataUpdateCheck(void);
         void publishTimerCallback();
+        void updateBeaconPositions();
 
 
         // Variables
@@ -146,7 +149,8 @@ class marvelmind_ros2 : public rclcpp::Node
         struct MarvelmindHedge * hedge = NULL;
         int64_t hedge_timestamp_prev = 0;
         struct timespec ts;
-        uint8_t beaconReadIterations;
+        bool stationary_beacon_updated;
+        std::vector<marvelmind_ros2_msgs::msg::BeaconPositionAddressed> stationary_beacons;
 
         // setup empty messages for sending
         marvelmind_ros2_msgs::msg::HedgePosition hedge_pos_noaddress_msg;// hedge coordinates message (old version without address) for publishing to ROS topic
@@ -160,10 +164,6 @@ class marvelmind_ros2 : public rclcpp::Node
         marvelmind_ros2_msgs::msg::HedgeQuality hedge_quality_msg;// Quality message for publishing to ROS topic
         marvelmind_ros2_msgs::msg::MarvelmindWaypoint marvelmind_waypoint_msg;// Waypoint message for publishing to ROS topic
         marvelmind_ros2_msgs::msg::MarvelmindUserData marvelmind_user_data_msg;// Waypoint message for publishing to ROS topic
+        marvelmind_ros2_msgs::msg::BeaconPositions beacon_positions;
 
 };
-
-
-
-
-
