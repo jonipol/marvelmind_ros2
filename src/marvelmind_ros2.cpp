@@ -36,8 +36,7 @@ DAMAGE.
 #include <marvelmind_ros2/marvelmind_ros2.hpp>
 
 marvelmind_ros2::marvelmind_ros2() : rclcpp::Node("marvelmind_ros2") {
-  static const rclcpp::Logger hedgehog_logger = rclcpp::get_logger("hedgehog_logger");   
-  RCLCPP_INFO(rclcpp::get_logger("hedgehog_logger"), "Constructor: marvelmind_ros2 pre-init");
+  RCLCPP_INFO(get_logger(), "Constructor: marvelmind_ros2 pre-init");
 
   // Declare params found in config
   // Topics
@@ -116,6 +115,11 @@ marvelmind_ros2::marvelmind_ros2() : rclcpp::Node("marvelmind_ros2") {
   this->marvelmind_user_data_publisher = this->create_publisher<marvelmind_ros2_msgs::msg::MarvelmindUserData>
       (this->marvelmind_user_data_topic, 20);
 
+  rclcpp::QoS transient_local_qos = rclcpp::QoS(1);
+  transient_local_qos.transient_local();
+  beacon_positions_publisher = create_publisher<marvelmind_ros2_msgs::msg::BeaconPositions>("/beacon_positions", transient_local_qos);
+  
+
   // do setup
   #ifndef WIN32
   sem = sem_open(this->data_input_semaphore_name.c_str(), O_CREAT, 0777, 0);
@@ -154,15 +158,15 @@ marvelmind_ros2::marvelmind_ros2() : rclcpp::Node("marvelmind_ros2") {
   this->beacon_pos_msg.x_m = 0.0;
   this->beacon_pos_msg.y_m = 0.0;
   this->beacon_pos_msg.z_m = 0.0;
-  
+
   this->publish_rate_ms = std::chrono::milliseconds((int)round(1000.0 / this->publish_rate_in_hz));
   this->marvelmind_ros2_pub_timer = this->create_wall_timer(this->publish_rate_ms, std::bind(&marvelmind_ros2::publishTimerCallback, this));
 
-  RCLCPP_DEBUG(rclcpp::get_logger("hedgehog_logger"), "Pub rate ms: %li", this->publish_rate_ms.count());
+  RCLCPP_DEBUG(get_logger(), "Pub rate ms: %li", this->publish_rate_ms.count());
 }
 
 marvelmind_ros2::~marvelmind_ros2() {
-  RCLCPP_INFO(rclcpp::get_logger("hedgehog_logger"), "Destructor starting marvelmind_ros2...");
+  RCLCPP_INFO(get_logger(), "Destructor starting marvelmind_ros2...");
 
   if (this->hedge != NULL) 
   {
@@ -173,13 +177,13 @@ marvelmind_ros2::~marvelmind_ros2() {
   #ifndef WIN32
   sem_close(sem);
   #endif
-  RCLCPP_INFO(rclcpp::get_logger("hedgehog_logger"), "Destructor: marvelmind_ros2");
+  RCLCPP_INFO(get_logger(), "Destructor: marvelmind_ros2");
 }
 
 // Global semaphore callback to avoid issues with class scope
 void semCallback()
 {
-  RCLCPP_DEBUG(rclcpp::get_logger("hedgehog_logger"), "Using sem callback...");
+  RCLCPP_DEBUG(rclcpp::get_logger("marvelmind_ros2"), "Using sem callback...");
 
   #ifndef WIN32
 	sem_post(sem);
@@ -197,13 +201,13 @@ int marvelmind_ros2::hedgeReceivePrepare()
     // port name comes from config file now instead of command line, same with baud rate
     const char * ttyFileName = this->tty_filename.c_str();
     uint32_t baudRate = this->tty_baudrate;
-    RCLCPP_INFO(rclcpp::get_logger("hedgehog_logger"), "Prepare: tty: %s and baud: %d", this->tty_filename.c_str(), this->tty_baudrate);
+    RCLCPP_INFO(get_logger(), "Prepare: tty: %s and baud: %d", this->tty_filename.c_str(), this->tty_baudrate);
 
     // Init
     this->hedge=createMarvelmindHedge();
     if (this->hedge==NULL)
     {
-      RCLCPP_ERROR(rclcpp::get_logger("hedgehog_logger"), "Error: Unable to create MarvelmindHedge");
+      RCLCPP_ERROR(get_logger(), "Error: Unable to create MarvelmindHedge");
       return -1;
     }
     this->hedge->ttyFileName=ttyFileName;
@@ -211,7 +215,7 @@ int marvelmind_ros2::hedgeReceivePrepare()
     this->hedge->verbose=true; // show errors and warnings
     this->hedge->anyInputPacketCallback = semCallback;
     startMarvelmindHedge(this->hedge);
-    RCLCPP_INFO(rclcpp::get_logger("hedgehog_logger"), "Hedgehog is running!");
+    RCLCPP_INFO(get_logger(), "Hedgehog is running!");
 
     return 0;
 }
@@ -301,14 +305,26 @@ bool marvelmind_ros2::beaconReceiveCheck(void)
   this->beacon_pos_msg.x_m= bp->x/1000.0; 
   this->beacon_pos_msg.y_m= bp->y/1000.0; 
   this->beacon_pos_msg.z_m= bp->z/1000.0; 
-  
+  updateBeaconPositions();
   return true;
+}
+
+void marvelmind_ros2::updateBeaconPositions()
+{
+  for (marvelmind_ros2_msgs::msg::BeaconPositionAddressed beacon : stationary_beacons)
+  {
+    if (beacon.address == beacon_pos_msg.address) {
+      beacon = beacon_pos_msg;
+      return;
+    }
+  }
+  stationary_beacons.push_back(beacon_pos_msg);
 }
 
 bool marvelmind_ros2::hedgeIMURawReceiveCheck(void)
 {
   if (!this->hedge->rawIMU.updated) {
-    RCLCPP_DEBUG(rclcpp::get_logger("hedgehog_logger"), "Hedgehog rawIMU not updated!");	
+    RCLCPP_DEBUG(get_logger(), "Hedgehog rawIMU not updated!");	
     return false;
   }
 
@@ -461,24 +477,24 @@ bool marvelmind_ros2::marvelmindUserDataUpdateCheck(void)
 
 void marvelmind_ros2::publishTimerCallback() {
   // Timer for firing publishers at defined update rate from config file
-  RCLCPP_DEBUG(rclcpp::get_logger("hedgehog_logger"),"Callback!");
+  RCLCPP_DEBUG(get_logger(),"Callback!");
   if (this->hedge->terminationRequired)
   {
-    RCLCPP_WARN(rclcpp::get_logger("hedgehog_logger"),"Termination Required");
+    RCLCPP_WARN(get_logger(),"Termination Required");
   }	
     
   #ifndef WIN32
   if (clock_gettime(CLOCK_REALTIME, &this->ts) == -1)
   {
-    RCLCPP_WARN(rclcpp::get_logger("hedgehog_logger"),"Clock Get Time Error");
+    RCLCPP_WARN(get_logger(),"Clock Get Time Error");
     return;
 	}
   #endif
 
-  RCLCPP_DEBUG(rclcpp::get_logger("hedgehog_logger"),"Starting Checks...");
+  RCLCPP_DEBUG(get_logger(),"Starting Checks...");
   this->ts.tv_sec += 2;
-  RCLCPP_DEBUG(rclcpp::get_logger("hedgehog_logger"),"Starting Checks 2...");
-  RCLCPP_DEBUG(rclcpp::get_logger("hedgehog_logger"),"Timespec: %11f", (double)this->ts.tv_sec);
+  RCLCPP_DEBUG(get_logger(),"Starting Checks 2...");
+  RCLCPP_DEBUG(get_logger(),"Timespec: %11f", (double)this->ts.tv_sec);
   
   // causes pause until semaphore can move on, always waits for 2 seconds
   #ifndef WIN32
@@ -487,11 +503,11 @@ void marvelmind_ros2::publishTimerCallback() {
   if (WaitForSingleObject( sem,   0L) != WAIT_OBJECT_0) return;
   #endif
   
-  RCLCPP_DEBUG(rclcpp::get_logger("hedgehog_logger"),"Do Hedge Receive Check!");
+  RCLCPP_DEBUG(get_logger(),"Do Hedge Receive Check!");
   if (this->hedgeReceiveCheck())
   {
     // hedgehog data received
-    RCLCPP_DEBUG(rclcpp::get_logger("hedgehog_logger"),"Address: %d, timestamp: %d, %d, X=%.3f  Y= %.3f  Z=%.3f  Angle: %.1f  flags=%d", 	
+    RCLCPP_DEBUG(get_logger(),"Address: %d, timestamp: %d, %d, X=%.3f  Y= %.3f  Z=%.3f  Angle: %.1f  flags=%d", 	
     (int) this->hedge_pos_ang_msg.address,
     (int) this->hedge_pos_ang_msg.timestamp_ms, 
     (int) (this->hedge_pos_ang_msg.timestamp_ms - this->hedge_timestamp_prev),
@@ -505,24 +521,30 @@ void marvelmind_ros2::publishTimerCallback() {
     this->hedge_timestamp_prev= this->hedge_pos_ang_msg.timestamp_ms;
   }
     
-  RCLCPP_DEBUG(rclcpp::get_logger("hedgehog_logger"),"Do Beacon recieve check!");
+  RCLCPP_DEBUG(get_logger(),"Do Beacon receive check!");
   while(this->beaconReceiveCheck())
   {
     // stationary beacons data received
-    RCLCPP_DEBUG(rclcpp::get_logger("hedgehog_logger"),"Stationary beacon: Address: %d, X=%.3f  Y= %.3f  Z=%.3f", 	
+    RCLCPP_DEBUG(get_logger(),"Stationary beacon: Address: %d, X=%.3f  Y= %.3f  Z=%.3f", 	
     (int) this->beacon_pos_msg.address,
     (float) this->beacon_pos_msg.x_m, (float) this->beacon_pos_msg.y_m, (float) this->beacon_pos_msg.z_m);
-    this->beacons_pos_publisher->publish(this->beacon_pos_msg);
-
-    this->beaconReadIterations++;
-    if (this->beaconReadIterations > 4)
-      break;
-  }
     
-  RCLCPP_DEBUG(rclcpp::get_logger("hedgehog_logger"),"Do hedge imu raw check!");
+    this->beacons_pos_publisher->publish(this->beacon_pos_msg);      
+    beaconReadIterations = 1;
+  }
+
+  // Reusing already existing beaconReadIterations variable. Could be turned to bool.
+  if (beaconReadIterations) {
+    RCLCPP_DEBUG(get_logger(), "Publishing bulk");
+    beacon_positions.beacons = stationary_beacons;
+    beacon_positions_publisher->publish(beacon_positions);
+    beaconReadIterations = 0;
+  }  
+  
+  RCLCPP_DEBUG(get_logger(),"Do hedge imu raw check!");
   if (this->hedgeIMURawReceiveCheck())
   {
-    RCLCPP_DEBUG(rclcpp::get_logger("hedgehog_logger"),"Raw IMU: Timestamp: %08d, aX=%05d aY=%05d aZ=%05d  gX=%05d gY=%05d gZ=%05d  cX=%05d cY=%05d cZ=%05d", 	
+    RCLCPP_DEBUG(get_logger(),"Raw IMU: Timestamp: %08d, aX=%05d aY=%05d aZ=%05d  gX=%05d gY=%05d gZ=%05d  cX=%05d cY=%05d cZ=%05d", 	
       (int) this->hedge_imu_raw_msg.timestamp_ms,
       (int) this->hedge_imu_raw_msg.acc_x, (int) this->hedge_imu_raw_msg.acc_y, (int) this->hedge_imu_raw_msg.acc_z,
       (int) this->hedge_imu_raw_msg.gyro_x, (int) this->hedge_imu_raw_msg.gyro_y, (int) this->hedge_imu_raw_msg.gyro_z,
@@ -530,10 +552,10 @@ void marvelmind_ros2::publishTimerCallback() {
     this->hedge_imu_raw_publisher->publish(this->hedge_imu_raw_msg);
   } 
   
-  RCLCPP_DEBUG(rclcpp::get_logger("hedgehog_logger"),"Do hedge IMU fusion check!");
+  RCLCPP_DEBUG(get_logger(),"Do hedge IMU fusion check!");
   if (this->hedgeIMUFusionReceiveCheck())
   {
-    RCLCPP_DEBUG(rclcpp::get_logger("hedgehog_logger"),"IMU fusion: Timestamp: %08d, X=%.3f  Y= %.3f  Z=%.3f  q=%.3f,%.3f,%.3f,%.3f v=%.3f,%.3f,%.3f  a=%.3f,%.3f,%.3f", 	
+    RCLCPP_DEBUG(get_logger(),"IMU fusion: Timestamp: %08d, X=%.3f  Y= %.3f  Z=%.3f  q=%.3f,%.3f,%.3f,%.3f v=%.3f,%.3f,%.3f  a=%.3f,%.3f,%.3f", 	
       (int) this->hedge_imu_fusion_msg.timestamp_ms,
       (float) this->hedge_imu_fusion_msg.x_m, (float) this->hedge_imu_fusion_msg.y_m, (float) this->hedge_imu_fusion_msg.z_m,
       (float) this->hedge_imu_fusion_msg.qw, (float) this->hedge_imu_fusion_msg.qx, (float) this->hedge_imu_fusion_msg.qy, (float) this->hedge_imu_fusion_msg.qz,
@@ -542,7 +564,7 @@ void marvelmind_ros2::publishTimerCallback() {
     this->hedge_imu_fusion_publisher->publish(this->hedge_imu_fusion_msg);
   } 
   
-  RCLCPP_DEBUG(rclcpp::get_logger("hedgehog_logger"),"Do hedge raw distance update!");
+  RCLCPP_DEBUG(get_logger(),"Do hedge raw distance update!");
   if (this->hedge->rawDistances.updated)
   {
     uint8_t i;
@@ -552,7 +574,7 @@ void marvelmind_ros2::publishTimerCallback() {
       this->getRawDistance(i);
       if (this->beacon_raw_distance_msg.address_beacon != 0)
       {
-        RCLCPP_DEBUG(rclcpp::get_logger("hedgehog_logger"),"Raw distance: %02d ==> %02d,  Distance= %.3f ", 	
+        RCLCPP_DEBUG(get_logger(),"Raw distance: %02d ==> %02d,  Distance= %.3f ", 	
         (int) this->beacon_raw_distance_msg.address_hedge,
         (int) this->beacon_raw_distance_msg.address_beacon,
         (float) this->beacon_raw_distance_msg.distance_m);
@@ -562,29 +584,29 @@ void marvelmind_ros2::publishTimerCallback() {
     this->hedge->rawDistances.updated= false;
   }
   
-  RCLCPP_DEBUG(rclcpp::get_logger("hedgehog_logger"),"Do hedge telem check!");
+  RCLCPP_DEBUG(get_logger(),"Do hedge telem check!");
   if (this->hedgeTelemetryUpdateCheck())
   {
-    RCLCPP_DEBUG(rclcpp::get_logger("hedgehog_logger"),"Vbat= %.3f V, RSSI= %02d ", 	
+    RCLCPP_DEBUG(get_logger(),"Vbat= %.3f V, RSSI= %02d ", 	
       (float) this->hedge_telemetry_msg.battery_voltage,
       (int) this->hedge_telemetry_msg.rssi_dbm);
     this->hedge_telemetry_publisher->publish(this->hedge_telemetry_msg);
   } 
     
-  RCLCPP_DEBUG(rclcpp::get_logger("hedgehog_logger"),"Do hedge quality check!");
+  RCLCPP_DEBUG(get_logger(),"Do hedge quality check!");
   if (this->hedgeQualityUpdateCheck())
   {
-    RCLCPP_DEBUG(rclcpp::get_logger("hedgehog_logger"),"Quality: Address= %d,  Quality= %02d %% ", 	
+    RCLCPP_DEBUG(get_logger(),"Quality: Address= %d,  Quality= %02d %% ", 	
       (int) this->hedge_quality_msg.address,
       (int) this->hedge_quality_msg.quality_percents);
     this->hedge_quality_publisher->publish(this->hedge_quality_msg);
   }
     
-  RCLCPP_DEBUG(rclcpp::get_logger("hedgehog_logger"),"Do marvel waypoint check!");
+  RCLCPP_DEBUG(get_logger(),"Do marvel waypoint check!");
   if (this->marvelmindWaypointUpdateCheck())
   {
     int n= this->marvelmind_waypoint_msg.item_index+1;
-    RCLCPP_DEBUG(rclcpp::get_logger("hedgehog_logger"),"Waypoint %03d/%03d: Type= %03d,  Param1= %05d, Param2= %05d, Param3= %05d ", 	
+    RCLCPP_DEBUG(get_logger(),"Waypoint %03d/%03d: Type= %03d,  Param1= %05d, Param2= %05d, Param3= %05d ", 	
       (int) n,
       (int) this->marvelmind_waypoint_msg.total_items, this->marvelmind_waypoint_msg.movement_type,
       this->marvelmind_waypoint_msg.param1, this->marvelmind_waypoint_msg.param2, this->marvelmind_waypoint_msg.param3);
@@ -594,7 +616,7 @@ void marvelmind_ros2::publishTimerCallback() {
   if (this->marvelmindUserDataUpdateCheck())
   {
       this->marvelmind_user_data_publisher->publish(this->marvelmind_user_data_msg);
-      RCLCPP_DEBUG(rclcpp::get_logger("hedgehog_logger"), "User data: Timestamp: %08d", (int)this->marvelmind_user_data_msg.timestamp_ms);
+      RCLCPP_DEBUG(get_logger(), "User data: Timestamp: %08d", (int)this->marvelmind_user_data_msg.timestamp_ms);
   }
 
 } // end timer callback
