@@ -149,7 +149,7 @@ class marvelmind_ros2 : public rclcpp::Node
         struct MarvelmindHedge * hedge = NULL;
         int64_t hedge_timestamp_prev = 0;
         struct timespec ts;
-        uint8_t beaconReadIterations;
+        bool stationary_beacon_updated;
         std::vector<marvelmind_ros2_msgs::msg::BeaconPositionAddressed> stationary_beacons;
 
         // setup empty messages for sending

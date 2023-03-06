@@ -314,11 +314,16 @@ void marvelmind_ros2::updateBeaconPositions()
   for (marvelmind_ros2_msgs::msg::BeaconPositionAddressed beacon : stationary_beacons)
   {
     if (beacon.address == beacon_pos_msg.address) {
-      beacon = beacon_pos_msg;
+      // Update only if has changed
+      if (beacon.x_m != beacon_pos_msg.x_m || beacon.y_m != beacon_pos_msg.y_m || beacon.z_m != beacon_pos_msg.z_m) {
+        beacon = beacon_pos_msg;
+        stationary_beacon_updated = true;
+      }
       return;
     }
   }
   stationary_beacons.push_back(beacon_pos_msg);
+  stationary_beacon_updated = true;
 }
 
 bool marvelmind_ros2::hedgeIMURawReceiveCheck(void)
@@ -530,15 +535,14 @@ void marvelmind_ros2::publishTimerCallback() {
     (float) this->beacon_pos_msg.x_m, (float) this->beacon_pos_msg.y_m, (float) this->beacon_pos_msg.z_m);
     
     this->beacons_pos_publisher->publish(this->beacon_pos_msg);      
-    beaconReadIterations = 1;
   }
 
   // Reusing already existing beaconReadIterations variable. Could be turned to bool.
-  if (beaconReadIterations) {
+  if (stationary_beacon_updated) {
     RCLCPP_DEBUG(get_logger(), "Publishing bulk");
     beacon_positions.beacons = stationary_beacons;
     beacon_positions_publisher->publish(beacon_positions);
-    beaconReadIterations = 0;
+    stationary_beacon_updated = false;
   }  
   
   RCLCPP_DEBUG(get_logger(),"Do hedge imu raw check!");
